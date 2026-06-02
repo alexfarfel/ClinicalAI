@@ -1,0 +1,47 @@
+ # Xcode build artifacts
+  build/
+  DerivedData/
+  *.pbxuser
+  !default.pbxuser
+  *.mode1v3
+  !default.mode1v3
+  *.mode2v3
+  !default.mode2v3
+  *.perspectivev3
+  !default.perspectivev3
+  xcuserdata/
+
+  # Xcode schemes (keep shared schemes, ignore personal ones)
+  *.xccheckout
+  *.moved-aside
+  *.xcuserstate
+  *.xcscmblueprint
+  
+  # Swift Package Manager
+  .build/
+  .swiftpm/
+  Packages/
+  Package.resolved
+
+  # CocoaPods (not used here, but just in case)
+  Pods/
+  *.xcworkspace
+  !*.xcodeproj/*.xcworkspace
+
+  # macOS metadata
+  .DS_Store
+  *.swp
+  *~
+
+  # Crash logs and instruments data
+  *.crash
+  *.ips
+  *.xcresult
+
+  # Simulator and device logs
+  *.log
+  
+  # Sensitive — never commit API keys
+  *.env
+  Secrets.swift
+  APIKeys.swift
