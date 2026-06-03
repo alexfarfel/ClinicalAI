@@ -37,7 +37,7 @@ struct EncounterView: View {
     @State private var showNoteView = false
     @State private var showFlash = false
 
-    init(
+    @MainActor init(
         glassesService: any GlassesServiceProtocol = MockGlassesService(),
         llmService: any LLMServiceProtocol = MockLLMService()
     ) {
