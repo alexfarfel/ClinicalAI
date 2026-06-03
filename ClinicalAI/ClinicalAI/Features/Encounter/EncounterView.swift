@@ -12,6 +12,10 @@
 //
 // Hardware button presses and on-screen taps call the same ViewModel methods,
 // so behavior is identical regardless of input source.
+//
+// @MainActor is applied at the struct level (not just init) so the compiler
+// never needs to insert async hops when initialising @Observable @MainActor
+// ViewModels from within the view hierarchy.
 
 import SwiftUI
 import UIKit
@@ -154,7 +158,7 @@ struct EncounterView: View {
                 .padding(.top, 8)
 
             if viewModel.discoveredDevices.isEmpty {
-                // Still scanning
+                // Still scanning — show a spinner.
                 VStack(spacing: 20) {
                     Spacer()
                     ProgressView()
@@ -164,7 +168,9 @@ struct EncounterView: View {
                     Spacer()
                 }
             } else {
-                // Devices found — let the physician choose
+                // Devices found — let the physician choose.
+                // Use List { ForEach } — never pass an array directly to List() when
+                // the element type uses a custom Identifiable conformance.
                 List {
                     ForEach(viewModel.discoveredDevices) { device in
                         Button {
@@ -177,6 +183,7 @@ struct EncounterView: View {
                                     .frame(width: 36)
 
                                 VStack(alignment: .leading, spacing: 3) {
+                                    // device.name is a plain String — never wrap in Binding.
                                     Text(device.name)
                                         .font(.body.weight(.medium))
                                         .foregroundStyle(.primary)
@@ -549,16 +556,15 @@ private struct FindingThumbnailView: View {
     }
 }
 
-// MARK: - Preview
+// MARK: - Previews
 
 #Preview("Idle") {
     EncounterView()
 }
 
 #Preview("Recording") {
-    let vm = EncounterViewModel(
+    EncounterView(
         glassesService: MockGlassesService(),
         llmService: MockLLMService()
     )
-    return EncounterView(glassesService: MockGlassesService(), llmService: MockLLMService())
 }

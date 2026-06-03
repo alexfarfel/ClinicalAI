@@ -11,15 +11,31 @@
 //   GlassesService           ←  real SDK, requires paired Ray-Ban Meta glasses
 //   MockGlassesService       ←  synthetic data, works in the simulator without hardware
 //
-// ── SDK integration notes ──────────────────────────────────────────────────────
-// • Wearables.configure() must be called once in ClinicalAIApp.init() before any SDK use.
-// • Devices only appear in devicesStream() after camera permission is granted AND the
-//   physician has paired the glasses in the Meta AI app.
-// • Audio arrives via standard iOS Bluetooth (AVAudioSession/AVAudioEngine); the SDK
-//   itself does not provide an audio stream API.
-// • The camera button press delivers data to photoDataPublisher; there is no separate
-//   "button pressed" event — the photo data arrival IS the event.
-// • App Store distribution is not yet supported by Meta; use release channels.
+// ── SDK type cheat-sheet (verified against swiftinterface) ────────────────────
+// • DeviceIdentifier         = typealias String
+// • Wearables.shared         returns any WearablesInterface
+// • WearablesInterface.devicesStream()  → AsyncStream<[DeviceIdentifier]>
+// • WearablesInterface.deviceForIdentifier(_:) → Device? (has .name: String)
+// • WearablesInterface.createSession(deviceSelector:) throws(DeviceSessionError) → DeviceSession
+// • DeviceSession.start()    synchronous, throws(DeviceSessionError)   — NOT async
+// • DeviceSession.stop()     synchronous, no throws                    — NOT async
+// • DeviceSession.stateStream() → AsyncStream<DeviceSessionState>
+//   DeviceSessionState cases: .idle .starting .started .paused .stopping .stopped
+// • DeviceSession.addStream(config:) throws(DeviceSessionError) → Stream?
+// • Stream.start()           async, non-throwing
+// • Stream.stop()            async, non-throwing
+// • Stream.capturePhoto(format:) → Bool   @discardableResult — NOT throwing
+// • Stream.videoFramePublisher / photoDataPublisher  are any Announcer<T>, use .listen(_:)
+// • StreamConfiguration.init(videoCodec:resolution:frameRate:) — frameRate is UInt
+// • VideoCodec cases:  .raw  .hvc1   (NOT .h264)
+// • PermissionStatus cases:  .granted  .denied   (NOT .unknown)
+// • SpecificDeviceSelector.init(device: DeviceIdentifier)
+// • AutoDeviceSelector.init(wearables: any WearablesInterface, filter: DeviceFilter? = nil)
+// • AnyListenerToken.cancel() is async
+//
+// ── Audio note ────────────────────────────────────────────────────────────────
+// Audio arrives via standard iOS Bluetooth (AVAudioSession/AVAudioEngine); the
+// MWDAT SDK itself does not expose an audio stream API.
 
 import AVFoundation
 import Foundation
@@ -57,8 +73,9 @@ enum ConnectionStatus: Equatable {
 /// A Meta AI glasses device discovered via MWDAT's `devicesStream()`.
 ///
 /// The physician sees a list of these and taps one to connect.
+/// Conforms to `Identifiable` so it can be used directly in SwiftUI `ForEach`.
 struct GlassesDevice: Identifiable, Equatable {
-    /// Locally-generated UUID that maps to the underlying `WearableDevice` reference.
+    /// Locally-generated UUID that maps to the underlying `DeviceIdentifier` in our map.
     let id: UUID
 
     /// The device's display name (e.g., "Ray-Ban Meta Studio"). Shown in the device picker.
@@ -260,9 +277,11 @@ protocol GlassesServiceProtocol: AnyObject {
 /// The glasses must be paired in the Meta AI app before they appear in `devicesStream()`.
 /// On first use, call `startRegistration()` to open the Meta AI app's pairing flow.
 ///
-/// ## SDK verification notes
-/// Several SDK method names are inferred from the API reference; they are flagged below.
-/// Build the app against the real SDK package to surface any mismatches as compile errors.
+/// ## Key SDK facts for maintainers
+/// - `DeviceSession.start()` is synchronous (throws, not async).
+/// - `DeviceSession.stop()` is synchronous and non-throwing.
+/// - `Stream.capturePhoto(format:)` returns Bool and does not throw.
+/// - Video and photo publishers use the `Announcer` pattern; subscribe with `.listen(_:)`.
 @Observable
 @MainActor
 final class GlassesService: GlassesServiceProtocol {
@@ -283,19 +302,29 @@ final class GlassesService: GlassesServiceProtocol {
 
     // ── MWDAT SDK references ──────────────────────────────────────────────────────
 
-    private let wearables = Wearables.shared
+    /// The shared MWDAT singleton. Typed as `any WearablesInterface` per the SDK.
+    private let wearables: any WearablesInterface = Wearables.shared
+
     private var deviceSession: DeviceSession?
     private var cameraStream: MWDATCamera.Stream?
 
-    /// Maps each `GlassesDevice.id` (our locally-generated UUID) to the underlying
-    /// `DeviceIdentifier` so `connect(to:)` can use `SpecificDeviceSelector`.
-    private var wearableDeviceMap: [UUID: DeviceIdentifier] = [:]
+    /// Maps each `GlassesDevice.id` (our locally-generated UUID) to the SDK's
+    /// `DeviceIdentifier` (String) so `connect(to:)` can build a `SpecificDeviceSelector`.
+    private var deviceIdentifierMap: [UUID: DeviceIdentifier] = [:]
 
-    // ── Photo capture bridge (callback → async/await) ─────────────────────────────
+    // ── Photo capture bridge (Announcer callback → async/await) ──────────────────
 
     /// A single in-flight continuation awaiting a JPEG from `photoDataPublisher`.
     /// At most one `capturePhoto()` call may be in flight at a time.
     private var photoContinuation: CheckedContinuation<Data, Error>?
+
+    // ── Listener tokens (replace publisher.values pattern) ───────────────────────
+
+    /// Subscription token for the video-frame listener. Cancel on stream teardown.
+    private var videoFrameListenerToken: (any AnyListenerToken)?
+
+    /// Subscription token for the photo-data listener. Cancel on stream teardown.
+    private var photoDataListenerToken: (any AnyListenerToken)?
 
     // ── Audio ─────────────────────────────────────────────────────────────────────
 
@@ -306,8 +335,6 @@ final class GlassesService: GlassesServiceProtocol {
 
     private var discoveryTask: Task<Void, Never>?
     private var sessionStateTask: Task<Void, Never>?
-    private var videoFrameTask: Task<Void, Never>?
-    private var photoDataTask: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -321,44 +348,46 @@ final class GlassesService: GlassesServiceProtocol {
 
     func startDiscovery() async throws {
         discoveredDevices = []
-        wearableDeviceMap = [:]
+        deviceIdentifierMap = [:]
         connectionStatus = .scanning
 
         // MWDAT requires camera permission before any device appears in devicesStream().
-        // The permission is granted (or denied) through the Meta AI app pairing flow.
-        let currentStatus = (try? await wearables.checkPermissionStatus(.camera)) ?? .unknown
+        // PermissionStatus has only .granted and .denied — default to .denied on error.
+        let currentStatus = (try? await wearables.checkPermissionStatus(.camera)) ?? .denied
         if currentStatus != .granted {
             let requested = (try? await wearables.requestPermission(.camera)) ?? .denied
-            if requested == .denied {
+            if requested != .granted {
                 connectionStatus = .error("Camera permission denied. Grant access via the Meta AI app.")
                 throw GlassesServiceError.bluetoothUnauthorized
             }
         }
 
-        // Subscribe to the devices stream. It emits a new [DeviceIdentifier] array each time
-        // the list of available paired devices changes. This loop runs until cancelled.
+        // devicesStream() emits a new [DeviceIdentifier] (= [String]) array each time the
+        // list of paired nearby glasses changes. This loop runs until the task is cancelled.
         discoveryTask?.cancel()
         discoveryTask = Task { [weak self] in
             guard let self else { return }
-            for await devices in wearables.devicesStream() {
+            for await identifiers in wearables.devicesStream() {
                 guard !Task.isCancelled else { break }
                 var map: [UUID: DeviceIdentifier] = [:]
                 var list: [GlassesDevice] = []
-                for identifier in devices {
+                for identifier in identifiers {
                     let localID = UUID()
                     map[localID] = identifier
+                    // deviceForIdentifier returns a Device? with a .name: String property.
+                    let displayName = wearables.deviceForIdentifier(identifier)?.name ?? "Ray-Ban Meta"
                     list.append(GlassesDevice(
                         id: localID,
-                        name: wearables.deviceForIdentifier(identifier)?.name ?? "Ray-Ban Meta",
-                        signalStrength: -60  // MWDAT does not expose RSSI
+                        name: displayName,
+                        signalStrength: -60  // MWDAT does not expose RSSI; -60 dBm is typical
                     ))
                 }
-                self.wearableDeviceMap = map
+                self.deviceIdentifierMap = map
                 self.discoveredDevices = list
             }
         }
 
-        // Give the first devicesStream() emission time to arrive before returning.
+        // Wait briefly so the first devicesStream() emission can arrive before we return.
         // EncounterViewModel polls discoveredDevices at 250 ms intervals, so this is fine.
         try await Task.sleep(for: .milliseconds(600))
     }
@@ -369,11 +398,10 @@ final class GlassesService: GlassesServiceProtocol {
         discoveryTask = nil
 
         do {
-            // Use SpecificDeviceSelector when we have the WearableDevice from discovery;
-            // fall back to AutoDeviceSelector if the mapping entry is missing (e.g., if
-            // discovery was skipped because the device was already known).
+            // Use SpecificDeviceSelector when we have the DeviceIdentifier from discovery;
+            // fall back to AutoDeviceSelector if the mapping entry is missing.
             let session: DeviceSession
-            if let identifier = wearableDeviceMap[device.id] {
+            if let identifier = deviceIdentifierMap[device.id] {
                 session = try wearables.createSession(
                     deviceSelector: SpecificDeviceSelector(device: identifier)
                 )
@@ -385,6 +413,7 @@ final class GlassesService: GlassesServiceProtocol {
             deviceSession = session
 
             // Observe session state so we can mirror it to connectionStatus.
+            // Start the listener BEFORE calling session.start() so no events are missed.
             sessionStateTask?.cancel()
             sessionStateTask = Task { [weak self] in
                 for await state in session.stateStream() {
@@ -402,12 +431,13 @@ final class GlassesService: GlassesServiceProtocol {
                 }
             }
 
-            try await session.start()
+            // session.start() is SYNCHRONOUS (throws DeviceSessionError), not async.
+            try session.start()
 
             // Attach the camera stream for live preview and photo capture.
             try await setupCameraStream(on: session)
 
-            // session.stateStream() may set .connected asynchronously; mirror it here too.
+            // Belt-and-suspenders: also set status here in case stateStream fires late.
             connectionStatus = .connected
 
         } catch let svcError as GlassesServiceError {
@@ -423,17 +453,17 @@ final class GlassesService: GlassesServiceProtocol {
         stopAudioCapture()
         tearDownCameraStream()
 
+        // DeviceSession.stop() is SYNCHRONOUS — no Task wrapper needed.
         let sessionToStop = deviceSession
         deviceSession = nil
-        // Stop the session asynchronously; fire-and-forget on disconnect.
-        Task { try? await sessionToStop?.stop() }
+        sessionToStop?.stop()
 
         discoveryTask?.cancel()
         discoveryTask = nil
         sessionStateTask?.cancel()
         sessionStateTask = nil
 
-        wearableDeviceMap = [:]
+        deviceIdentifierMap = [:]
         discoveredDevices = []
         connectionStatus = .disconnected
     }
@@ -482,22 +512,21 @@ final class GlassesService: GlassesServiceProtocol {
             throw GlassesServiceError.photoCaptureFailed("A photo capture is already in progress.")
         }
 
-        // Bridge the Combine-style photoDataPublisher to async/await via a continuation.
-        // capturePhoto(format:) triggers the SDK to capture; the result arrives on
-        // photoDataPublisher which is observed by photoDataTask and resumes this continuation.
+        // Bridge the Announcer-style photoDataPublisher to async/await via a continuation.
+        // capturePhoto(format:) tells the SDK to capture; the photo arrives on the
+        // photoDataListenerToken callback which resolves this continuation.
         return try await withCheckedThrowingContinuation { [weak self] continuation in
             guard let self else {
                 continuation.resume(throwing: GlassesServiceError.notConnected)
                 return
             }
             self.photoContinuation = continuation
-            do {
-                try stream.capturePhoto(format: .jpeg)
-            } catch {
-                // capturePhoto(format:) threw synchronously — resolve immediately.
+            // capturePhoto(format:) returns Bool and does NOT throw.
+            let triggered = stream.capturePhoto(format: .jpeg)
+            if !triggered {
                 self.photoContinuation = nil
                 continuation.resume(throwing: GlassesServiceError.photoCaptureFailed(
-                    error.localizedDescription
+                    "capturePhoto(format:) returned false — glasses may not be ready."
                 ))
             }
         }
@@ -511,45 +540,42 @@ final class GlassesService: GlassesServiceProtocol {
     /// The physician completes pairing in the Meta AI app; on return, iOS calls the
     /// app's `onOpenURL` handler with a `clinicalai://` deep link which must be passed
     /// to `Wearables.shared.handleUrl(_:)` (wired up in ClinicalAIApp).
-    func startRegistration() throws {
-        try wearables.startRegistration()
+    func startRegistration() async throws {
+        try await wearables.startRegistration()
     }
 
     /// Removes ClinicalAI's registration from the Meta AI app.
-    func startUnregistration() throws {
-        try wearables.startUnregistration()
+    func startUnregistration() async throws {
+        try await wearables.startUnregistration()
     }
 
     // MARK: - Private: camera stream
 
     private func setupCameraStream(on session: DeviceSession) async throws {
         // Clinical exam capture profile:
-        //   resolution: .medium (504 × 896) — enough detail for skin findings, rashes, etc.
+        //   resolution: .medium — enough detail for skin findings, rashes, etc.
         //   frameRate: 15 fps — reduces battery drain; we want stills, not continuous video
-        //   videoCodec: .h264 — hardware-accelerated on all A-series chips
+        //   videoCodec: .hvc1 — hardware-accelerated H.265 on A-series chips
+        //   Note: StreamConfiguration.frameRate is UInt, and VideoCodec is .hvc1 (not .h264)
         let config = StreamConfiguration(
-            videoCodec: .h264,
+            videoCodec: .hvc1,
             resolution: .medium,
             frameRate: 15
         )
 
-        // NOTE: The exact method to attach a Stream to a DeviceSession is inferred from
-        // common MWDAT patterns. Verify this call against the SDK headers before shipping.
-        // Alternative method names to try if this does not compile:
-        //   session.createCameraStream(configuration: config)
-        //   session.createStream(configuration: config)
-        let stream = try session.addStream(configuration: config)
+        // addStream(config:) returns Stream? and throws DeviceSessionError.
+        guard let stream = try session.addStream(config: config) else {
+            // No camera capability available on this session — proceed without camera.
+            return
+        }
         cameraStream = stream
 
-        // ── Live video preview ────────────────────────────────────────────────────
-        // videoFramePublisher emits VideoFrame values while the stream is active.
-        // NOTE: .values requires this to be a Combine Publisher (AnyPublisher<VideoFrame, Never>
-        // or equivalent). Verify the publisher's type from the SDK headers.
-        videoFrameTask?.cancel()
-        videoFrameTask = Task { [weak self] in
-            for await frame in stream.videoFramePublisher.values {
-                guard let self, !Task.isCancelled else { break }
-                self.latestVideoFrame = frame
+        // ── Live video preview ─────────────────────────────────────────────────────
+        // videoFramePublisher is any Announcer<VideoFrame>; subscribe with .listen(_:).
+        // The callback runs on the SDK's internal thread so we dispatch to @MainActor.
+        videoFrameListenerToken = stream.videoFramePublisher.listen { @Sendable [weak self] frame in
+            Task { @MainActor [weak self] in
+                self?.latestVideoFrame = frame
             }
         }
 
@@ -558,25 +584,13 @@ final class GlassesService: GlassesServiceProtocol {
         //   1. capturePhoto(format:) was called programmatically → resolve photoContinuation
         //   2. The camera button on the glasses was pressed → emit a hardware event
         // In both cases the data arrives here; we distinguish by checking photoContinuation.
-        photoDataTask?.cancel()
-        photoDataTask = Task { [weak self] in
-            for await photo in stream.photoDataPublisher.values {
-                guard let self, !Task.isCancelled else { break }
-
-                // NOTE: Verify the exact data-access property on the SDK's PhotoData type.
-                // Common candidates: photo.data, photo.jpegData, photo.imageData
-                let imageData: Data? = photo.data
-
+        photoDataListenerToken = stream.photoDataPublisher.listen { @Sendable [weak self] photoData in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
                 if let continuation = self.photoContinuation {
                     // Resolve a capturePhoto() call that is awaiting this result.
                     self.photoContinuation = nil
-                    if let data = imageData {
-                        continuation.resume(returning: data)
-                    } else {
-                        continuation.resume(throwing: GlassesServiceError.photoCaptureFailed(
-                            "SDK returned nil image data — verify PhotoData.data property name."
-                        ))
-                    }
+                    continuation.resume(returning: photoData.data)
                 } else {
                     // No programmatic capture in flight → physical camera button was pressed.
                     self.hardwareEventContinuation?.yield(.cameraButtonPressed)
@@ -584,19 +598,30 @@ final class GlassesService: GlassesServiceProtocol {
             }
         }
 
-        try await stream.start()
+        // stream.start() IS async (unlike session.start() which is synchronous).
+        await stream.start()
     }
 
     private func tearDownCameraStream() {
-        videoFrameTask?.cancel()
-        videoFrameTask = nil
-        photoDataTask?.cancel()
-        photoDataTask = nil
+        // Cancel listener subscriptions asynchronously (AnyListenerToken.cancel() is async).
+        let vft = videoFrameListenerToken
+        let pdt = photoDataListenerToken
+        videoFrameListenerToken = nil
+        photoDataListenerToken = nil
+        Task {
+            await vft?.cancel()
+            await pdt?.cancel()
+        }
 
+        // Stop the camera stream asynchronously (Stream.stop() is async).
+        let streamToStop = cameraStream
+        cameraStream = nil
+        Task { await streamToStop?.stop() }
+
+        // Fail any in-flight photo continuation.
         photoContinuation?.resume(throwing: GlassesServiceError.photoCaptureFailed("Disconnected"))
         photoContinuation = nil
 
-        cameraStream = nil
         latestVideoFrame = nil
     }
 
@@ -608,15 +633,15 @@ final class GlassesService: GlassesServiceProtocol {
     /// `.allowBluetooth` routes the mic input through them when they are the active
     /// Bluetooth audio source.
     private func configureAudioSession() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(
+        let avAudioSession = AVAudioSession.sharedInstance()
+        try avAudioSession.setCategory(
             .playAndRecord,
             mode: .default,
             options: [.allowBluetooth, .defaultToSpeaker]
         )
         // 16 kHz is the sample rate most ASR engines (including SFSpeechRecognizer) prefer.
-        try session.setPreferredSampleRate(16_000)
-        try session.setActive(true)
+        try avAudioSession.setPreferredSampleRate(16_000)
+        try avAudioSession.setActive(true)
     }
 
     /// Installs an AVAudioEngine input tap and forwards 16-bit PCM buffers as AudioChunks.

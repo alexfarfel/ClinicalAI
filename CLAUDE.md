@@ -80,6 +80,12 @@ Services are injected via protocol so they can be swapped for mocks during devel
   Xcode processes it automatically
 - Multi-line Swift string literals: every line inside must be 
   indented at least as far as the closing triple-quote
+  
+  ## Git Structure
+- Outer repo: ~/Desktop/ClinicalAI (git lives here)
+- Swift files live in ClinicalAI/ClinicalAI/
+- Previously had broken submodule — fixed in commit 54d80b1
+- Always commit from ~/Desktop/ClinicalAI
 
 ## Current Build Status (update each session)
 - Prompt 1 complete: 14 Swift stubs created

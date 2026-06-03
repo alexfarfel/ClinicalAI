@@ -7,6 +7,12 @@
 // Hardware events from GlassesService and on-screen button taps both converge on
 // the same captureExamFinding() method, so behavior is identical regardless of
 // which input source the physician uses.
+//
+// Concurrency model:
+// - The class is @MainActor so all property mutations are on the main thread.
+// - Background tasks (timer, polling, audio consumption) use [weak self] captures
+//   and guard against nil self before mutating any state.
+// - GlassesServiceProtocol is @MainActor, so reading its properties is safe here.
 
 import Foundation
 
@@ -82,8 +88,12 @@ final class EncounterViewModel {
 
     /// Creates the ViewModel with the services it depends on.
     ///
-    /// The hardware event subscription starts immediately and runs for the
-    /// lifetime of the ViewModel. Events are silently ignored when `state != .recording`.
+    /// The hardware event subscription starts immediately in a background Task and runs
+    /// for the lifetime of the ViewModel. Events are silently ignored when
+    /// `state != .recording`.
+    ///
+    /// Both parameters use opaque types (`some`) rather than existentials (`any`) so
+    /// Swift can infer concrete types from the call site without boxing overhead.
     init(
         glassesService: some GlassesServiceProtocol,
         llmService: some LLMServiceProtocol
