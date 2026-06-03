@@ -87,14 +87,11 @@ Services are injected via protocol so they can be swapped for mocks during devel
 - Previously had broken submodule — fixed in commit 54d80b1
 - Always commit from ~/Desktop/ClinicalAI
 
-## Current Build Status (update each session)
-- Prompt 1 complete: 14 Swift stubs created
-- Prompt 2 complete: data models implemented  
-- Prompt 3 complete: GlassesService with real MWDAT SDK
-- Prompt 4 complete: LLMService with Claude API
-- Prompt 5 in progress: EncounterView has remaining build errors
-- Next: fix EncounterView @MainActor, List/ForEach, 
-  WearableDevice type errors
+## Current Build Status
+- Prompts 1-5 COMPLETE, build clean
+- Next: Prompt 6 — Note review and export UI
+- Next: Prompt 7 — AI diagnostic partner
+- Then: live test with physical glasses
 
 ## MWDAT SDK Facts
 - Correct imports: import
