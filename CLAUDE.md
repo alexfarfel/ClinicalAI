@@ -1,5 +1,10 @@
 # ClinicalAI
 
+## Current Status (update this each session)
+- Prompt 1 COMPLETE: 14 Swift stubs created, duplicates resolved
+- Xcode 16 auto-discovers Swift files — no pbxproj edits needed
+- Next step: Prompt 2 — implement data models
+
 ## What this is
 An iOS app that pairs with Meta AI smart glasses to function as an ambient clinical 
 documentation assistant. The glasses capture audio and visual data during patient 
@@ -47,3 +52,43 @@ Services are injected via protocol so they can be swapped for mocks during devel
 6. Physician reviews, edits, exports to EHR
 7. (Phase 2) During the encounter, "Consult AI" opens a chat interface with real-time 
    differential diagnoses and testing suggestions
+
+## Meta Wearables SDK
+- Package: https://github.com/facebook/meta-wearables-dat-ios
+- Imports: import MWDATCore, import MWDATCamera
+- API reference: https://wearables.developer.meta.com/llms.txt?full=true
+- The SDK works through the Meta AI app — glasses must be paired there first
+- Key classes: Wearables (singleton), DeviceSession, Stream, AutoDeviceSelector
+- Camera capture: stream.capturePhoto(format: .jpeg) triggers photoDataPublisher
+- Audio: accessed via standard iOS Bluetooth audio profile (AVAudioSession)
+- App Store submission not yet supported — distribute via release channels
+
+## Known Mistakes — Never Do These
+- WearableDevice does not exist in the MWDAT SDK. Never invent 
+  type names — always verify against the API reference at 
+  https://wearables.developer.meta.com/llms.txt?full=true
+- Never wrap Text() views with Binding — pass String values 
+  directly e.g. Text(device.name) not Text($device.name)
+- Never use List(array) directly with custom types — always use 
+  List { ForEach(array) { item in ... } }
+- SwiftUI Views that initialize @Observable ViewModels must be 
+  marked @MainActor at the struct level
+- URLSession instances must never be named `session` — use 
+  `urlSession` to avoid conflicts with EncounterSession 
+  parameters
+- Info.plist must never be added to Copy Bundle Resources — 
+  Xcode processes it automatically
+- Multi-line Swift string literals: every line inside must be 
+  indented at least as far as the closing triple-quote
+
+## Current Build Status (update each session)
+- Prompt 1 complete: 14 Swift stubs created
+- Prompt 2 complete: data models implemented  
+- Prompt 3 complete: GlassesService with real MWDAT SDK
+- Prompt 4 complete: LLMService with Claude API
+- Prompt 5 in progress: EncounterView has remaining build errors
+- Next: fix EncounterView @MainActor, List/ForEach, 
+  WearableDevice type errors
+
+## MWDAT SDK Facts
+- Correct imports: import
