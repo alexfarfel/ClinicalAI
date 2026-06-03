@@ -9,10 +9,9 @@
 // which input source the physician uses.
 //
 // Concurrency model:
-// - The class is @MainActor so all property mutations are on the main thread.
+// - @Observable handles property observation; no @MainActor on the class.
 // - Background tasks (timer, polling, audio consumption) use [weak self] captures
 //   and guard against nil self before mutating any state.
-// - GlassesServiceProtocol is @MainActor, so reading its properties is safe here.
 
 import Foundation
 
@@ -37,9 +36,7 @@ enum EncounterState: Equatable {
 
 // MARK: - EncounterViewModel
 
-@Observable
-@MainActor
-final class EncounterViewModel {
+@Observable class EncounterViewModel {
 
     // MARK: - Injected services
 
@@ -95,8 +92,8 @@ final class EncounterViewModel {
     /// Both parameters use opaque types (`some`) rather than existentials (`any`) so
     /// Swift can infer concrete types from the call site without boxing overhead.
     init(
-        glassesService: some GlassesServiceProtocol,
-        llmService: some LLMServiceProtocol
+        glassesService: any GlassesServiceProtocol = MockGlassesService(),
+        llmService: any LLMServiceProtocol = MockLLMService()
     ) {
         self.glassesService = glassesService
         self.llmService = llmService

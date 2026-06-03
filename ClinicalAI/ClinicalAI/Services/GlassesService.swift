@@ -74,17 +74,12 @@ enum ConnectionStatus: Equatable {
 ///
 /// The physician sees a list of these and taps one to connect.
 /// Conforms to `Identifiable` so it can be used directly in SwiftUI `ForEach`.
-struct GlassesDevice: Identifiable, Equatable {
-    /// Locally-generated UUID that maps to the underlying `DeviceIdentifier` in our map.
+struct GlassesDevice: Identifiable, Sendable {
     let id: UUID
-
-    /// The device's display name (e.g., "Ray-Ban Meta Studio"). Shown in the device picker.
     let name: String
-
-    /// Received signal strength in dBm. MWDAT does not expose RSSI directly;
-    /// this is set to a fixed –60 dBm (typical connected device value).
     let signalStrength: Int
 }
+
 
 // MARK: - AudioChunk
 
@@ -251,7 +246,6 @@ struct HardwareActionMapping: Codable, Equatable {
 /// Both concrete implementations (`GlassesService` and `MockGlassesService`) satisfy
 /// this protocol. ViewModels receive a `GlassesServiceProtocol` and never import the
 /// MWDAT SDK directly.
-@MainActor
 protocol GlassesServiceProtocol: AnyObject {
 
     var connectionStatus: ConnectionStatus { get }
@@ -700,8 +694,7 @@ final class GlassesService: GlassesServiceProtocol {
 /// To use a realistic test image, add a JPEG or PNG with that name to `Assets.xcassets`.
 /// Falls back to a generated teal checkerboard placeholder when the asset is absent.
 @Observable
-@MainActor
-final class MockGlassesService: GlassesServiceProtocol {
+class MockGlassesService: GlassesServiceProtocol {
 
     // ── Observable state ─────────────────────────────────────────────────────────
 

@@ -13,22 +13,19 @@
 // Hardware button presses and on-screen taps call the same ViewModel methods,
 // so behavior is identical regardless of input source.
 //
-// @MainActor is applied at the struct level (not just init) so the compiler
-// never needs to insert async hops when initialising @Observable @MainActor
-// ViewModels from within the view hierarchy.
+// The ViewModel default value (MockGlassesService / MockLLMService) means this
+// view works in Previews and the simulator without any hardware or custom init.
 
 import SwiftUI
 import UIKit
 
 // MARK: - EncounterView
 
-@MainActor
 struct EncounterView: View {
 
     /// The ViewModel is owned here (not in a parent) so its lifecycle matches the view.
-    /// Pass a ViewModel with real services for production; the default uses mocks so
-    /// the view works in Previews and the simulator without hardware.
-    @State private var viewModel: EncounterViewModel
+    /// SwiftUI initialises @State lazily on the main thread; no custom init is needed.
+    @State private var viewModel = EncounterViewModel()
 
     // ── View-only state ───────────────────────────────────────────────────────────
     @State private var showAnnotationSheet = false
@@ -36,16 +33,6 @@ struct EncounterView: View {
     @State private var showHardwareMapping = false
     @State private var showNoteView = false
     @State private var showFlash = false
-
-    @MainActor init(
-        glassesService: any GlassesServiceProtocol = MockGlassesService(),
-        llmService: any LLMServiceProtocol = MockLLMService()
-    ) {
-        _viewModel = State(wrappedValue: EncounterViewModel(
-            glassesService: glassesService,
-            llmService: llmService
-        ))
-    }
 
     var body: some View {
         NavigationStack {
@@ -169,38 +156,10 @@ struct EncounterView: View {
                 }
             } else {
                 // Devices found — let the physician choose.
-                // Use List { ForEach } — never pass an array directly to List() when
-                // the element type uses a custom Identifiable conformance.
+                // Pass the array explicitly so the compiler can resolve the concrete
+                // element type without ambiguity from @Observable + @State inference.
                 List {
-                    ForEach(viewModel.discoveredDevices) { device in
-                        Button {
-                            Task { await viewModel.connect(to: device) }
-                        } label: {
-                            HStack(spacing: 14) {
-                                Image(systemName: "eyeglasses")
-                                    .font(.title2)
-                                    .foregroundStyle(.blue)
-                                    .frame(width: 36)
-
-                                VStack(alignment: .leading, spacing: 3) {
-                                    // device.name is a plain String — never wrap in Binding.
-                                    Text(device.name)
-                                        .font(.body.weight(.medium))
-                                        .foregroundStyle(.primary)
-                                    Text("Signal: \(device.signalStrength) dBm")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiaryLabel)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    deviceListRows(viewModel.discoveredDevices)
                 }
                 .listStyle(.insetGrouped)
             }
@@ -258,6 +217,43 @@ struct EncounterView: View {
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
+        }
+    }
+
+    // MARK: - Device list rows
+
+    /// Renders one list row per discovered glasses device.
+    /// Accepts the array as an explicit parameter so Swift can resolve GlassesDevice
+    /// as a concrete (non-binding) type in the ForEach without actor-isolation ambiguity.
+    @ViewBuilder
+    private func deviceListRows(_ devices: [GlassesDevice]) -> some View {
+        ForEach(devices, id: \GlassesDevice.id) { (device: GlassesDevice) in
+            Button {
+                Task { await viewModel.connect(to: device) }
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "eyeglasses")
+                        .font(.title2)
+                        .foregroundStyle(.blue)
+                        .frame(width: 36)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(device.name)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text("Signal: \(device.signalStrength) dBm")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -563,8 +559,5 @@ private struct FindingThumbnailView: View {
 }
 
 #Preview("Recording") {
-    EncounterView(
-        glassesService: MockGlassesService(),
-        llmService: MockLLMService()
-    )
+    EncounterView()
 }

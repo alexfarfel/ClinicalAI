@@ -519,7 +519,7 @@ final class LLMService: LLMServiceProtocol {
 ///
 /// The note reflects a realistic community-acquired pneumonia case so reviewers can
 /// evaluate the note format and layout with clinically meaningful content.
-final class MockLLMService: LLMServiceProtocol {
+class MockLLMService: LLMServiceProtocol {
 
     func generateNote(from session: EncounterSession) async throws -> ClinicalNote {
         // Simulate the 3–8 s that a real API call takes so UI loading states can be tested.
