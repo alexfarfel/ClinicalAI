@@ -1,9 +1,11 @@
 # ClinicalAI
 
 ## Current Status (update this each session)
-- Prompt 1 COMPLETE: 14 Swift stubs created, duplicates resolved
-- Xcode 16 auto-discovers Swift files — no pbxproj edits needed
-- Next step: Prompt 2 — implement data models
+- Prompts 1-5 COMPLETE, build clean (commit e3719bc)
+- @MainActor concurrency cascade resolved — see rules below
+- Next: Prompt 6 — Note review and export UI
+- Next: Prompt 7 — AI diagnostic partner
+- Then: live test with physical glasses
 
 ## What this is
 An iOS app that pairs with Meta AI smart glasses to function as an ambient clinical 
@@ -71,8 +73,21 @@ Services are injected via protocol so they can be swapped for mocks during devel
   directly e.g. Text(device.name) not Text($device.name)
 - Never use List(array) directly with custom types — always use 
   List { ForEach(array) { item in ... } }
-- SwiftUI Views that initialize @Observable ViewModels must be 
-  marked @MainActor at the struct level
+- Do NOT put @MainActor on a SwiftUI View struct, a protocol, 
+  or a Mock class/init — this causes cascading concurrency errors 
+  with the project's Swift 6 upcoming-feature flags
+- @Observable ViewModel: no @MainActor on class or init; use 
+  default service values directly in init()
+- View declares viewModel as: @State private var viewModel = EncounterViewModel()
+  with NO custom init on the View
+- ForEach over GlassesDevice arrays: use a @ViewBuilder helper 
+  func that accepts [GlassesDevice] as an explicit parameter, 
+  and write ForEach(devices, id: \GlassesDevice.id) { (d: GlassesDevice) in
+  — the explicit key-path root avoids Binding<C> overload ambiguity
+  from InferIsolatedConformances upcoming-feature flag
+- Types passed across task/actor boundaries (e.g. GlassesDevice) 
+  must conform to Sendable
+- ShapeStyle.tertiaryLabel removed in iOS 26 SDK — use .tertiary
 - URLSession instances must never be named `session` — use 
   `urlSession` to avoid conflicts with EncounterSession 
   parameters
@@ -88,7 +103,8 @@ Services are injected via protocol so they can be swapped for mocks during devel
 - Always commit from ~/Desktop/ClinicalAI
 
 ## Current Build Status
-- Prompts 1-5 COMPLETE, build clean
+- Prompts 1-5 COMPLETE, build clean (commit e3719bc)
+- @MainActor concurrency model fully resolved
 - Next: Prompt 6 — Note review and export UI
 - Next: Prompt 7 — AI diagnostic partner
 - Then: live test with physical glasses
