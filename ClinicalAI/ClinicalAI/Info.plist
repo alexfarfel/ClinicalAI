@@ -25,6 +25,17 @@
     <string>6.0</string>
 
     <!-- ═══════════════════════════════════════════════════════════════════════════
+         Allowed URL query schemes — required by iOS for the app to check whether
+         the Meta AI companion app is installed (canOpenURL). The SDK calls this
+         internally as part of startRegistration(). Without this entry, iOS silently
+         blocks the query on iOS 9+ and registration will fail.
+    ═══════════════════════════════════════════════════════════════════════════════ -->
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+        <string>fb-viewapp</string>
+    </array>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════════
          Deep-link URL scheme — required by MWDAT for the Meta AI app registration
          callback. The Meta AI app redirects to clinicalai:// after the physician
          completes glasses pairing. Wearables.shared.handleUrl(_:) processes the URL.
