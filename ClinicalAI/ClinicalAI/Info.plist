@@ -40,7 +40,7 @@
 		<key>MetaAppID</key>
 		<string>4755280994792511</string>
 		<key>TeamID</key>
-		<string>$(DEVELOPMENT_TEAM)</string>
+		<string>F74TQ3S46Y</string>
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>ClinicalAI uses Bluetooth to connect to your Meta AI glasses for audio capture and photo capture during patient encounters.</string>
