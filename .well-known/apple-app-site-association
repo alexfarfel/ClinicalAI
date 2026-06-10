@@ -1,0 +1,11 @@
+{
+    "applinks": {
+        "apps": [],
+        "details": [
+            {
+                "appID": "F74TQ3S46Y.farfelmed.ClinicalAI",
+                "paths": ["/callback/*"]
+            }
+        ]
+    }
+}

@@ -57,31 +57,24 @@
     </array>
 
     <!-- ═══════════════════════════════════════════════════════════════════════════
-         Meta Wearables Device Access Toolkit (MWDAT) configuration.
+         MWDAT — DEVELOPER MODE (active)
+         Bypasses attestation so the glasses can be connected without a registered
+         MetaAppID, ClientToken, or TeamID. Requires Developer Mode to be enabled
+         on the glasses: Meta AI app → Settings → Your glasses → Developer Mode.
 
-         MetaAppID and ClientToken are supplied via Build Settings user-defined
-         variables (META_APP_ID, CLIENT_TOKEN) so they never appear as literals
-         in source code. Add them in Xcode → Project → Build Settings → + → Add
-         User-Defined Setting:
-             META_APP_ID   = <your Meta app ID>
-             CLIENT_TOKEN  = <your client token>
-
-         TeamID must match the Apple Developer Team ID of the signing certificate.
-         It is read from DEVELOPMENT_TEAM which Xcode sets automatically.
-
-         DAMEnabled enables the Device Access Manager, required for camera access.
+         TO RESTORE PRODUCTION CONFIG: replace this dict with the block below.
+         -----------------------------------------------------------------------
+         PRODUCTION CONFIG (commented out — restore when submitting to release):
+             AppLinkURLScheme  clinicalai://
+             MetaAppID         $(META_APP_ID)   [Build Setting: META_APP_ID]
+             ClientToken       $(CLIENT_TOKEN)  [Build Setting: CLIENT_TOKEN]
+             TeamID            $(DEVELOPMENT_TEAM)
+             DAMEnabled        true
+         -----------------------------------------------------------------------
     ═══════════════════════════════════════════════════════════════════════════════ -->
     <key>MWDAT</key>
     <dict>
-        <key>AppLinkURLScheme</key>
-        <string>clinicalai://</string>
-        <key>MetaAppID</key>
-        <string>$(META_APP_ID)</string>
-        <key>ClientToken</key>
-        <string>$(CLIENT_TOKEN)</string>
-        <key>TeamID</key>
-        <string>$(DEVELOPMENT_TEAM)</string>
-        <key>DAMEnabled</key>
+        <key>DeveloperModeEnabled</key>
         <true/>
     </dict>
 
