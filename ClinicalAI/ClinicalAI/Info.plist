@@ -33,8 +33,16 @@
 	</array>
 	<key>MWDAT</key>
 	<dict>
-		<key>DeveloperModeEnabled</key>
+		<key>AppLinkURLScheme</key>
+		<string>https://alexfarfel.github.io/ClinicalAI/</string>
+		<key>ClientToken</key>
+		<string>$(CLIENT_TOKEN)</string>
+		<key>DAMEnabled</key>
 		<true/>
+		<key>MetaAppID</key>
+		<string>$(META_APP_ID)</string>
+		<key>TeamID</key>
+		<string>$(DEVELOPMENT_TEAM)</string>
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>ClinicalAI uses Bluetooth to connect to your Meta AI glasses for audio capture and photo capture during patient encounters.</string>

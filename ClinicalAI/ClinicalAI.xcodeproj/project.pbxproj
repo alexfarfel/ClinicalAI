@@ -115,10 +115,10 @@
 					A35DDBF12FCE80E500AC8FF0 = {
 						CreatedOnToolsVersion = 26.3;
 						SystemCapabilities = {
-							com.apple.developer.associated-domains = {
+							"com.apple.developer.associated-domains" = {
 								enabled = 1;
 							};
-							com.apple.external-accessory.wireless-configuration = {
+							"com.apple.external-accessory.wireless-configuration" = {
 								enabled = 1;
 							};
 						};

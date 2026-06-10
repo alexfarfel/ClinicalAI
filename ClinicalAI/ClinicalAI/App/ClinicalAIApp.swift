@@ -13,10 +13,14 @@
 //   a. SDK emits .available from registrationStateStream() → MetaAIRegistrationView appears.
 //   b. Physician taps "Set Up in Meta AI" → Wearables.shared.startRegistration() opens Meta AI.
 //   c. Physician grants access in the Meta AI app and taps "Done".
-//   d. Meta AI deep-links back via clinicalai:// → onOpenURL fires.
+//   d. Meta AI deep-links back via farfelmed.ClinicalAI:// → onOpenURL fires.
 //   e. Wearables.shared.handleUrl(_:) processes the callback.
 //   f. SDK emits .registered → registration sheet dismisses automatically.
 //   g. On the next startDiscovery(), the glasses appear in devicesStream().
+//
+// Reset flow (if registration appears stuck):
+//   Tap "Force Re-register" → startUnregistration() then startRegistration().
+//   This clears any cached credential state on the SDK side and re-opens Meta AI.
 //
 // RegistrationState cases (from MWDATCore swiftinterface):
 //   .unavailable  — cannot register right now (Meta AI not installed, no internet)
@@ -48,15 +52,18 @@ struct ClinicalAIApp: App {
 
     init() {
         // MWDAT must be configured once before any other SDK call.
-        // If configuration fails (e.g., the Info.plist MWDAT dict is incomplete),
-        // glasses features will be unavailable but the rest of the app still works.
+        // Production config is read from Info.plist MWDAT dict:
+        //   MetaAppID      = $(META_APP_ID)   from Secrets.xcconfig
+        //   ClientToken    = $(CLIENT_TOKEN)   from Secrets.xcconfig
+        //   TeamID         = $(DEVELOPMENT_TEAM)  = F74TQ3S46Y
+        //   AppLinkURLScheme = https://alexfarfel.github.io/ClinicalAI/
+        //   DAMEnabled     = true
         do {
             try Wearables.configure()
+            print("ClinicalAI ✅ Wearables.configure() succeeded")
         } catch {
-            // Developer error: verify Info.plist has the correct MWDAT dict with
-            // MetaAppID, ClientToken, TeamID, AppLinkURLScheme, and DAMEnabled = true.
-            print("ClinicalAI ⚠️ Meta Wearables SDK configuration failed: \(error)")
-            print("ClinicalAI ⚠️ Glasses features will be unavailable. Check Info.plist MWDAT dict.")
+            print("ClinicalAI ⚠️ Wearables.configure() failed: \(error)")
+            print("ClinicalAI ⚠️ Check Info.plist MWDAT dict and Secrets.xcconfig values.")
         }
     }
 
@@ -64,18 +71,36 @@ struct ClinicalAIApp: App {
         WindowGroup {
             ContentView()
                 // ── Meta AI registration gate ─────────────────────────────────────
-                // Shown on first launch (or if the physician unregistered).
-                // Non-dismissible: the physician must complete setup to use the glasses.
                 .sheet(isPresented: .constant(showRegistration)) {
-                    MetaAIRegistrationView(isRegistering: registrationState == .registering) {
-                        Task {
-                            do {
-                                try await Wearables.shared.startRegistration()
-                            } catch {
-                                print("ClinicalAI: startRegistration failed: \(error)")
+                    MetaAIRegistrationView(
+                        isRegistering: registrationState == .registering,
+                        onRegister: {
+                            print("ClinicalAI 🔑 'Set Up in Meta AI' tapped — registrationState = \(String(describing: registrationState))")
+                            Task {
+                                do {
+                                    print("ClinicalAI 🔑 Calling startRegistration()…")
+                                    try await Wearables.shared.startRegistration()
+                                    print("ClinicalAI 🔑 startRegistration() returned without error")
+                                } catch {
+                                    print("ClinicalAI 🔑 startRegistration() failed: \(error)")
+                                }
+                            }
+                        },
+                        onReset: {
+                            print("ClinicalAI 🔑 'Force Re-register' tapped — registrationState = \(String(describing: registrationState))")
+                            Task {
+                                do {
+                                    print("ClinicalAI 🔑 Calling startUnregistration()…")
+                                    try await Wearables.shared.startUnregistration()
+                                    print("ClinicalAI 🔑 startUnregistration() complete — calling startRegistration()…")
+                                    try await Wearables.shared.startRegistration()
+                                    print("ClinicalAI 🔑 startRegistration() returned without error after reset")
+                                } catch {
+                                    print("ClinicalAI 🔑 reset flow failed: \(error)")
+                                }
                             }
                         }
-                    }
+                    )
                 }
                 // ── API key gate ──────────────────────────────────────────────────
                 .sheet(isPresented: $showAPIKeySetup) {
@@ -84,24 +109,25 @@ struct ClinicalAIApp: App {
                     }
                 }
                 // ── MWDAT deep-link handler ───────────────────────────────────────
-                // The Meta AI app calls back to clinicalai:// after the physician
-                // completes the registration flow. Forward the URL to the SDK.
+                // Meta AI calls back via the farfelmed.ClinicalAI:// scheme after the
+                // physician completes the registration flow. Forward to the SDK.
                 .onOpenURL { url in
+                    print("ClinicalAI 🔗 onOpenURL: \(url)")
                     Task {
                         do {
-                            _ = try await Wearables.shared.handleUrl(url)
+                            let handled = try await Wearables.shared.handleUrl(url)
+                            print("ClinicalAI 🔗 handleUrl returned: \(handled)")
                         } catch {
-                            // handleUrl can fail if the URL scheme is unrecognised or
-                            // the registration was cancelled. Log and continue.
-                            print("ClinicalAI: Wearables.handleUrl failed for \(url): \(error)")
+                            print("ClinicalAI 🔗 handleUrl failed for \(url): \(error)")
                         }
                     }
                 }
                 // ── Registration state observation ────────────────────────────────
-                // The stream emits the current state immediately on subscription, then
-                // on every change. Storing it in @State drives showRegistration above.
+                // The stream emits the current state immediately on subscription,
+                // then on every change. Each emission is logged for debugging.
                 .task {
                     for await state in Wearables.shared.registrationStateStream() {
+                        print("ClinicalAI 🔑 registrationState → \(state)")
                         registrationState = state
                     }
                 }
@@ -113,15 +139,14 @@ struct ClinicalAIApp: App {
 
 /// One-time setup sheet shown when the app is not yet registered with Meta AI.
 ///
-/// The physician taps "Set Up in Meta AI" → Wearables.shared.startRegistration()
-/// opens the Meta AI app. The physician approves there, Meta AI calls back via
-/// clinicalai://, the SDK processes the URL, and emits .registered — at which
-/// point ClinicalAIApp.showRegistration becomes false and the sheet dismisses.
+/// Normal flow: tap "Set Up in Meta AI" → completes in Meta AI app → sheet auto-dismisses.
+/// Reset flow:  tap "Force Re-register" → clears cached state → re-opens Meta AI.
 private struct MetaAIRegistrationView: View {
 
     /// True while the SDK handshake is in progress (state == .registering).
     let isRegistering: Bool
     let onRegister: () -> Void
+    let onReset: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -145,8 +170,8 @@ private struct MetaAIRegistrationView: View {
 
                 Spacer()
 
-                // While the handshake is in flight show a spinner instead of the
-                // button so the physician knows to switch to the Meta AI app.
+                // While the handshake is in flight show a spinner so the
+                // physician knows to switch to the Meta AI app.
                 if isRegistering {
                     VStack(spacing: 12) {
                         ProgressView()
@@ -157,16 +182,27 @@ private struct MetaAIRegistrationView: View {
                     }
                     .padding(.bottom, 32)
                 } else {
-                    Button(action: onRegister) {
-                        Label("Set Up in Meta AI", systemImage: "arrow.up.right.square")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
+                    VStack(spacing: 12) {
+                        Button(action: onRegister) {
+                            Label("Set Up in Meta AI", systemImage: "arrow.up.right.square")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .padding(.horizontal, 24)
+
+                        // Reset clears any stale cached registration on the SDK side
+                        // and forces a fresh trip through the Meta AI permission dialog.
+                        Button(action: onReset) {
+                            Text("Force Re-register")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.bottom, 32)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 32)
                 }
             }
             .padding(.horizontal, 16)
