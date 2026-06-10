@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Universal Links — lets iOS route https://alexfarfel.github.io/ClinicalAI/ back
+	     into this app. Required because AppLinkURLScheme in the MWDAT dict is an https URL. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:alexfarfel.github.io</string>
+	</array>
+	<!-- Wireless Accessory Configuration — allows the app to configure Wi-Fi accessories
+	     (Meta glasses) on the local network. Required for MWDAT wireless setup flow. -->
+	<key>com.apple.external-accessory.wireless-configuration</key>
+	<true/>
+</dict>
+</plist>
