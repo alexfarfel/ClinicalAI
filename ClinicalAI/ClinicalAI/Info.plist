@@ -21,7 +21,7 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>farfelmed.ClinicalAI</string>
+				<string>com.farfelmed.ClinicalAI</string>
 			</array>
 		</dict>
 	</array>
@@ -34,7 +34,7 @@
 	<key>MWDAT</key>
 	<dict>
 		<key>AppLinkURLScheme</key>
-		<string>https://alexfarfel.github.io/ClinicalAI/</string>
+		<string>com.farfelmed.ClinicalAI://</string>
 		<key>ClientToken</key>
 		<string>$(CLIENT_TOKEN)</string>
 		<key>DAMEnabled</key>

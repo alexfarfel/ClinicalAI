@@ -13,7 +13,7 @@
 //   a. SDK emits .available from registrationStateStream() → MetaAIRegistrationView appears.
 //   b. Physician taps "Set Up in Meta AI" → Wearables.shared.startRegistration() opens Meta AI.
 //   c. Physician grants access in the Meta AI app and taps "Done".
-//   d. Meta AI deep-links back via farfelmed.ClinicalAI:// → onOpenURL fires.
+//   d. Meta AI deep-links back via com.farfelmed.ClinicalAI:// → onOpenURL fires.
 //   e. Wearables.shared.handleUrl(_:) processes the callback.
 //   f. SDK emits .registered → registration sheet dismisses automatically.
 //   g. On the next startDiscovery(), the glasses appear in devicesStream().
@@ -109,7 +109,7 @@ struct ClinicalAIApp: App {
                     }
                 }
                 // ── MWDAT deep-link handler ───────────────────────────────────────
-                // Meta AI calls back via the farfelmed.ClinicalAI:// scheme after the
+                // Meta AI calls back via com.farfelmed.ClinicalAI:// after the
                 // physician completes the registration flow. Forward to the SDK.
                 .onOpenURL { url in
                     print("ClinicalAI 🔗 onOpenURL: \(url)")
