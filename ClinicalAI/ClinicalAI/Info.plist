@@ -34,13 +34,11 @@
 	<key>MWDAT</key>
 	<dict>
 		<key>AppLinkURLScheme</key>
-		<string>com.farfelmed.ClinicalAI://</string>
+		<string>https://alexfarfel.github.io/ClinicalAI/</string>
 		<key>ClientToken</key>
-		<string>$(CLIENT_TOKEN)</string>
-		<key>DAMEnabled</key>
-		<true/>
+		<string>AR|4755280994792511|84dcd903054d2e0008d1fe6cf3fac9ad</string>
 		<key>MetaAppID</key>
-		<string>$(META_APP_ID)</string>
+		<string>4755280994792511</string>
 		<key>TeamID</key>
 		<string>$(DEVELOPMENT_TEAM)</string>
 	</dict>
