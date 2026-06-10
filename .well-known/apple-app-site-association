@@ -3,7 +3,7 @@
         "apps": [],
         "details": [
             {
-                "appID": "F74TQ3S46Y.farfelmed.ClinicalAI",
+                "appID": "F74TQ3S46Y.com.farfelmed.ClinicalAI",
                 "paths": ["/callback/*"]
             }
         ]
