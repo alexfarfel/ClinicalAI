@@ -1,9 +1,8 @@
 # ClinicalAI
 
 ## Current Status (update this each session)
-- Prompts 1-5 COMPLETE, build clean (commit e3719bc)
+- Prompts 1-6 COMPLETE
 - @MainActor concurrency cascade resolved — see rules below
-- Next: Prompt 6 — Note review and export UI
 - Next: Prompt 7 — AI diagnostic partner
 - Then: live test with physical glasses
 
@@ -103,11 +102,12 @@ Services are injected via protocol so they can be swapped for mocks during devel
 - Always commit from ~/Desktop/ClinicalAI
 
 ## Current Status
-- Prompts 1-5 complete, build clean
-- MWDAT production config finalized
-- Meta portal: version 1.0.0 building, awaiting artifact completion
-- Next: assign to release channel once build completes
-- Next: Prompts 6 and 7 (Note UI and Diagnostic partner)
+- Prompts 1-5 complete
+- Meta glasses CONNECTED and working ✅
+- Registration, camera permission, devicesStream all working
+- Next: Prompt 6 — Note review UI
+- Next: Prompt 7 — AI diagnostic partner
+- Then: test full encounter with glasses
 
 ## MWDAT SDK Facts
 - Correct imports: import

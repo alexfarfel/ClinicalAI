@@ -1,44 +1,212 @@
 // NoteViewModel.swift
-// ClinicalAI — Note Business Logic
+// ClinicalAI — Note Review Business Logic
 //
-// Drives the NoteView. Currently holds the note and tracks whether the physician
-// has made any edits. Full responsibilities (encryption, persistence, EHR export)
-// will be implemented in a future prompt.
+// Drives NoteView for reviewing, editing, and exporting the SOAP note
+// produced by Claude at the end of a patient encounter.
+//
+// Design:
+//   • Each SOAP section is an independent String property so the physician can
+//     amend any section without disturbing the others.
+//   • isDirty compares current field values against snapshots taken at init time.
+//     This drives the "reviewed/pending" badge and the EHR attestation footer.
+//   • formattedNoteText assembles the plain-text EHR export from the current
+//     (possibly edited) field values every time it is read.
+//   • The original EncounterSession is retained so regenerateNote() can re-submit
+//     the same transcript and image data to Claude.
+//
+// @MainActor is intentionally absent — see CLAUDE.md concurrency rules.
 
 import Foundation
 
+// MARK: - NoteViewModel
+
 @Observable
-@MainActor
 final class NoteViewModel {
 
-    // MARK: - State
+    // MARK: - Dependencies
 
-    /// The SOAP note being reviewed. All five fields are independently editable.
-    var note: ClinicalNote
+    /// The encounter session this note was generated from. Retained for regeneration.
+    private let session: EncounterSession
 
-    /// True once the physician has modified any field after the AI generated the note.
-    /// Shown in the UI so the physician knows which notes they have personally reviewed.
-    var isDirty: Bool { note.isEdited }
+    /// The AI service to call when the physician requests a regenerated note.
+    private let llmService: any LLMServiceProtocol
+
+    // MARK: - Note metadata (immutable)
+
+    /// Wall-clock time when Claude first generated this note.
+    let generatedAt: Date
+
+    // MARK: - Editable SOAP fields
+    //
+    // Populated from Claude's output at init. Physician edits are written directly
+    // to these properties — no separate "draft" copy needed.
+
+    /// The patient's primary reason for the visit, ideally in their own words.
+    var chiefComplaint: String
+
+    /// Expanded narrative of the illness: onset, character, severity, timing,
+    /// aggravating/relieving factors, and associated symptoms.
+    var hpi: String
+
+    /// Objective physical examination findings, including visual findings from the
+    /// glasses camera. Combined verbal + visual observations assembled by Claude.
+    var physicalExam: String
+
+    /// Primary diagnosis, differential diagnoses, and overall clinical impression.
+    var assessment: String
+
+    /// Treatment, medications, referrals, patient education, and follow-up schedule.
+    var plan: String
+
+    // MARK: - Dirty-tracking snapshots
+    //
+    // Set once at init and never changed. Comparing current field values against
+    // these snapshots tells us whether the physician has modified Claude's output.
+
+    private let snapshotChiefComplaint: String
+    private let snapshotHpi: String
+    private let snapshotPhysicalExam: String
+    private let snapshotAssessment: String
+    private let snapshotPlan: String
+
+    // MARK: - UI state
+
+    /// True while the LLM regeneration call is in flight.
+    /// The View disables the Regenerate button and shows a spinner.
+    var isRegenerating = false
+
+    /// Non-nil when the most recent regeneration attempt failed.
+    /// Displayed below the Regenerate button so the physician can retry.
+    var regenerationError: String?
+
+    /// Flipped to true by exportNote(). The View watches this to show the
+    /// confirmation banner, then resets it to false after 2 seconds.
+    var showExportConfirmation = false
+
+    // MARK: - Computed properties
+
+    /// True when any SOAP field has been changed from Claude's original output.
+    ///
+    /// Used to determine:
+    ///   1. Whether to show the "Reviewed" vs. "Pending review" badge.
+    ///   2. Which attestation footer to include in the EHR export.
+    var isDirty: Bool {
+        chiefComplaint != snapshotChiefComplaint
+            || hpi          != snapshotHpi
+            || physicalExam != snapshotPhysicalExam
+            || assessment   != snapshotAssessment
+            || plan         != snapshotPlan
+    }
+
+    /// The complete SOAP note as a plain-text string, ready for pasting into an EHR.
+    ///
+    /// Reflects the physician's current edits, not Claude's original output.
+    /// Appends an appropriate attestation footer depending on isDirty.
+    var formattedNoteText: String {
+        var lines = [
+            "CHIEF COMPLAINT",
+            chiefComplaint.isEmpty ? "—" : chiefComplaint,
+            "",
+            "HISTORY OF PRESENT ILLNESS",
+            hpi.isEmpty ? "—" : hpi,
+            "",
+            "PHYSICAL EXAMINATION",
+            physicalExam.isEmpty ? "—" : physicalExam,
+            "",
+            "ASSESSMENT",
+            assessment.isEmpty ? "—" : assessment,
+            "",
+            "PLAN",
+            plan.isEmpty ? "—" : plan,
+            "",
+            "---",
+        ]
+        lines.append(
+            isDirty
+                ? "Note generated by ClinicalAI (AI-assisted) and reviewed and amended by the attending physician."
+                : "Note generated by ClinicalAI (AI-assisted). Pending physician review."
+        )
+        return lines.joined(separator: "\n")
+    }
+
+    /// Exam findings from the session in the order they were captured during the encounter.
+    ///
+    /// `image` may be nil on each finding if EncounterViewModel already cleared raw image
+    /// data after note generation — this is expected per the patient-privacy rules.
+    /// Annotation text is always preserved for display in the Physical Exam card.
+    var examFindings: [ExamFinding] {
+        session.examFindings
+    }
 
     // MARK: - Init
 
-    init(note: ClinicalNote) {
-        self.note = note
+    /// Creates the ViewModel from a generated note and its source encounter session.
+    ///
+    /// - Parameters:
+    ///   - note:       The ClinicalNote Claude returned. Its fields are copied into editable
+    ///                 properties and snapshot for dirty tracking.
+    ///   - session:    The EncounterSession that produced the note. Retained so the physician
+    ///                 can regenerate the note without re-doing the encounter.
+    ///   - llmService: The AI service to call on regeneration. Defaults to MockLLMService for
+    ///                 Xcode Previews and development; the production caller can pass LLMService().
+    init(
+        note: ClinicalNote,
+        session: EncounterSession,
+        llmService: any LLMServiceProtocol = MockLLMService()
+    ) {
+        self.session     = session
+        self.llmService  = llmService
+        self.generatedAt = note.generatedAt
+
+        // Populate the editable working copies from Claude's output.
+        chiefComplaint = note.chiefComplaint
+        hpi            = note.historyOfPresentIllness
+        physicalExam   = note.physicalExamFindings
+        assessment     = note.assessment
+        plan           = note.plan
+
+        // Freeze the originals for later dirty comparison.
+        snapshotChiefComplaint = note.chiefComplaint
+        snapshotHpi            = note.historyOfPresentIllness
+        snapshotPhysicalExam   = note.physicalExamFindings
+        snapshotAssessment     = note.assessment
+        snapshotPlan           = note.plan
     }
 
-    // MARK: - Editing
+    // MARK: - Actions
 
-    /// Marks the note as physician-reviewed. Call after any field edit.
-    func markEdited() {
-        note.isEdited = true
+    /// Signals that the note has been exported.
+    ///
+    /// The View is responsible for the actual UIPasteboard write (UIKit dependency
+    /// stays in the View layer). This method sets showExportConfirmation = true so
+    /// the View displays the "Note copied" banner for 2 seconds.
+    func exportNote() {
+        showExportConfirmation = true
     }
 
-    /// Returns the note formatted as plain text for copy-paste into an EHR system.
-    var plainTextForEHR: String {
-        note.plainTextForEHR
-    }
+    /// Asks Claude to regenerate the SOAP note from the original encounter data.
+    ///
+    /// On success: all five SOAP fields are overwritten with the new content.
+    /// On failure: existing fields are unchanged and regenerationError is set.
+    ///
+    /// Guard against calling while a regeneration is already in progress; the
+    /// Regenerate button is disabled in that state.
+    func regenerateNote() async {
+        guard !isRegenerating else { return }
+        isRegenerating    = true
+        regenerationError = nil
 
-    // TODO: Implement encrypt(_ note:) via EncryptionService before persisting to disk.
-    // TODO: Implement save() to write the encrypted note to the app's documents directory.
-    // TODO: Implement delete() to purge the note when the physician dismisses without saving.
+        do {
+            let fresh  = try await llmService.generateNote(from: session)
+            chiefComplaint = fresh.chiefComplaint
+            hpi            = fresh.historyOfPresentIllness
+            physicalExam   = fresh.physicalExamFindings
+            assessment     = fresh.assessment
+            plan           = fresh.plan
+        } catch {
+            regenerationError = "Regeneration failed: \(error.localizedDescription)"
+        }
+
+        isRegenerating = false
+    }
 }

@@ -60,9 +60,12 @@ struct EncounterView: View {
             .sheet(isPresented: $showAnnotationSheet) { annotationSheet }
             .sheet(isPresented: $showHardwareMapping) { HardwareMappingView() }
             // ── Navigation ────────────────────────────────────────────────────────
+            // Pass both the note and session — NoteViewModel needs the session
+            // to show exam-finding thumbnails and to support note regeneration.
             .navigationDestination(isPresented: $showNoteView) {
-                if let note = viewModel.generatedNote {
-                    NoteView(note: note)
+                if let note = viewModel.generatedNote,
+                   let session = viewModel.currentSession {
+                    NoteView(note: note, session: session)
                 }
             }
             // ── Reactive responses ────────────────────────────────────────────────
