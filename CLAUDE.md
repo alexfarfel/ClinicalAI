@@ -102,12 +102,12 @@ Services are injected via protocol so they can be swapped for mocks during devel
 - Previously had broken submodule — fixed in commit 54d80b1
 - Always commit from ~/Desktop/ClinicalAI
 
-## Current Build Status
-- Prompts 1-5 COMPLETE, build clean (commit e3719bc)
-- @MainActor concurrency model fully resolved
-- Next: Prompt 6 — Note review and export UI
-- Next: Prompt 7 — AI diagnostic partner
-- Then: live test with physical glasses
+## Current Status
+- Prompts 1-5 complete, build clean
+- MWDAT production config finalized
+- Meta portal: version 1.0.0 building, awaiting artifact completion
+- Next: assign to release channel once build completes
+- Next: Prompts 6 and 7 (Note UI and Diagnostic partner)
 
 ## MWDAT SDK Facts
 - Correct imports: import

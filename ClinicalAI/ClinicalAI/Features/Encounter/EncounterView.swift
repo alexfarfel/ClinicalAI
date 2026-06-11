@@ -13,8 +13,8 @@
 // Hardware button presses and on-screen taps call the same ViewModel methods,
 // so behavior is identical regardless of input source.
 //
-// The ViewModel default value (MockGlassesService / MockLLMService) means this
-// view works in Previews and the simulator without any hardware or custom init.
+// Production: EncounterViewModel() uses GlassesService (real MWDAT SDK) by default.
+// For Previews/simulator, pass EncounterViewModel(glassesService: MockGlassesService()).
 
 import SwiftUI
 import UIKit
@@ -24,8 +24,9 @@ import UIKit
 struct EncounterView: View {
 
     /// The ViewModel is owned here (not in a parent) so its lifecycle matches the view.
-    /// SwiftUI initialises @State lazily on the main thread; no custom init is needed.
-    @State private var viewModel = EncounterViewModel()
+    /// GlassesService() is passed explicitly so the real MWDAT SDK is used in production.
+    /// EncounterView is implicitly @MainActor so GlassesService() (also @MainActor) is valid here.
+    @State private var viewModel = EncounterViewModel(glassesService: GlassesService())
 
     // ── View-only state ───────────────────────────────────────────────────────────
     @State private var showAnnotationSheet = false

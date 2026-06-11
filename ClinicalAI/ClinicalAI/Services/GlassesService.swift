@@ -418,7 +418,7 @@ final class GlassesService: GlassesServiceProtocol {
         discoveredDevices = []
         deviceIdentifierMap = [:]
         connectionStatus = .scanning
-        print("ClinicalAI 🔍 startDiscovery() called")
+        print("ClinicalAI 🔍 startDiscovery() CALLED")
 
         // Step 1: wait for the Bluetooth radio to be fully powered on.
         // The MWDAT SDK has its own internal CBCentralManager; calling devicesStream()

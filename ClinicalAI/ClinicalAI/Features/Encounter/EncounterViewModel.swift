@@ -91,6 +91,9 @@ enum EncounterState: Equatable {
     ///
     /// Both parameters use opaque types (`some`) rather than existentials (`any`) so
     /// Swift can infer concrete types from the call site without boxing overhead.
+    ///
+    /// Pass the services to use. Production callers pass GlassesService(); Previews and
+    /// tests pass MockGlassesService() to avoid touching real hardware.
     init(
         glassesService: any GlassesServiceProtocol = MockGlassesService(),
         llmService: any LLMServiceProtocol = MockLLMService()
