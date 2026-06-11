@@ -38,6 +38,7 @@
 // MWDAT SDK itself does not expose an audio stream API.
 
 import AVFoundation
+import CoreBluetooth
 import Foundation
 import MWDATCamera
 import MWDATCore
@@ -263,6 +264,73 @@ protocol GlassesServiceProtocol: AnyObject {
     func capturePhoto() async throws -> Data
 }
 
+// MARK: - BluetoothReadinessMonitor
+
+/// Waits until the system's Bluetooth radio is fully powered on before MWDAT discovery begins.
+///
+/// The MWDAT SDK uses its own internal CBCentralManager. If we call devicesStream() while
+/// CoreBluetooth is still initialising, the SDK logs:
+///   "CBCentralManager can only accept this command while in the powered on state"
+/// and discovery silently fails. This monitor creates a separate CBCentralManager on the main
+/// queue solely to watch Bluetooth state; waitUntilReady() suspends until .poweredOn arrives.
+///
+/// @unchecked Sendable is safe: CBCentralManager fires its delegate on DispatchQueue.main,
+/// and waitUntilReady() is always called from GlassesService which is @MainActor — so
+/// `waiters` is only ever touched on the main thread.
+private final class BluetoothReadinessMonitor: NSObject, CBCentralManagerDelegate, @unchecked Sendable {
+
+    private var manager: CBCentralManager!
+    // Pending continuations; filled when state is not yet .poweredOn.
+    private var waiters: [CheckedContinuation<Void, Error>] = []
+
+    override init() {
+        super.init()
+        // queue: .main ensures centralManagerDidUpdateState fires on the main queue.
+        manager = CBCentralManager(delegate: self, queue: .main)
+    }
+
+    /// Returns immediately if already .poweredOn; otherwise suspends until it is.
+    func waitUntilReady() async throws {
+        print("ClinicalAI 📶 Bluetooth state on entry: \(describe(manager.state))")
+        switch manager.state {
+        case .poweredOn:
+            return
+        case .poweredOff, .unauthorized, .unsupported:
+            throw GlassesServiceError.bluetoothUnauthorized
+        default:
+            // .unknown or .resetting — Bluetooth is still initialising, suspend here.
+            print("ClinicalAI 📶 Bluetooth not ready yet — waiting for .poweredOn…")
+            try await withCheckedThrowingContinuation { waiters.append($0) }
+        }
+    }
+
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        print("ClinicalAI 📶 CBCentralManager → \(describe(central.state))")
+        let pending = waiters
+        waiters.removeAll()
+        switch central.state {
+        case .poweredOn:
+            pending.forEach { $0.resume() }
+        case .poweredOff, .unauthorized, .unsupported:
+            pending.forEach { $0.resume(throwing: GlassesServiceError.bluetoothUnauthorized) }
+        default:
+            waiters = pending   // still transitioning — put them back and keep waiting
+        }
+    }
+
+    private func describe(_ state: CBManagerState) -> String {
+        switch state {
+        case .unknown:      return "unknown"
+        case .resetting:    return "resetting"
+        case .unsupported:  return "unsupported"
+        case .unauthorized: return "unauthorized"
+        case .poweredOff:   return "poweredOff"
+        case .poweredOn:    return "poweredOn"
+        @unknown default:   return "unknown(\(state.rawValue))"
+        }
+    }
+}
+
 // MARK: - Live Implementation
 
 /// Production glasses service backed by the Meta Wearables Device Access Toolkit (MWDAT).
@@ -293,6 +361,12 @@ final class GlassesService: GlassesServiceProtocol {
 
     private(set) var hardwareEvents: AsyncStream<GlassesHardwareEvent>
     private var hardwareEventContinuation: AsyncStream<GlassesHardwareEvent>.Continuation?
+
+    // ── Bluetooth readiness ───────────────────────────────────────────────────────
+
+    /// Monitors CBCentralManager state so startDiscovery() can wait for .poweredOn
+    /// before issuing any MWDAT calls. Initialised here so warm-up begins early.
+    private let bluetoothMonitor = BluetoothReadinessMonitor()
 
     // ── MWDAT SDK references ──────────────────────────────────────────────────────
 
@@ -344,14 +418,26 @@ final class GlassesService: GlassesServiceProtocol {
         discoveredDevices = []
         deviceIdentifierMap = [:]
         connectionStatus = .scanning
-        print("ClinicalAI 🔍 startDiscovery() — requesting camera permission")
+        print("ClinicalAI 🔍 startDiscovery() called")
 
-        // Step 1: check/request camera permission before subscribing to devicesStream().
+        // Step 1: wait for the Bluetooth radio to be fully powered on.
+        // The MWDAT SDK has its own internal CBCentralManager; calling devicesStream()
+        // before the radio is ready causes "CBCentralManager can only accept this command
+        // while in the powered on state". We wait for our own monitor to confirm .poweredOn,
+        // then add a 1-second settling delay to give the SDK's internal manager time too.
+        print("ClinicalAI 🔍 step 1 — waiting for Bluetooth .poweredOn…")
+        try await bluetoothMonitor.waitUntilReady()
+        print("ClinicalAI 🔍 Bluetooth powered on — settling 1 s before MWDAT calls…")
+        try await Task.sleep(for: .seconds(1))
+        print("ClinicalAI 🔍 settling complete")
+
+        // Step 2: check/request camera permission before subscribing to devicesStream().
         // PermissionStatus has only .granted and .denied — default to .denied on error.
+        print("ClinicalAI 🔍 step 2 — checking camera permission…")
         let currentStatus = (try? await wearables.checkPermissionStatus(.camera)) ?? .denied
         print("ClinicalAI 🔍 camera permission check: \(currentStatus)")
         if currentStatus != .granted {
-            print("ClinicalAI 🔍 camera not yet granted — requesting…")
+            print("ClinicalAI 🔍 camera not yet granted — calling requestPermission(.camera)…")
             let requested = (try? await wearables.requestPermission(.camera)) ?? .denied
             print("ClinicalAI 🔍 camera permission after request: \(requested)")
             if requested != .granted {
@@ -359,7 +445,7 @@ final class GlassesService: GlassesServiceProtocol {
                 throw GlassesServiceError.bluetoothUnauthorized
             }
         }
-        print("ClinicalAI 🔍 camera permission granted — subscribing to devicesStream()")
+        print("ClinicalAI 🔍 step 3 — camera permission granted, subscribing to devicesStream()")
 
         // Step 2: subscribe to devicesStream(). Emits a fresh [DeviceIdentifier] array
         // each time the set of paired nearby glasses changes.
