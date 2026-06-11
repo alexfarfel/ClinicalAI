@@ -13,10 +13,17 @@
 //   a. SDK emits .available from registrationStateStream() → MetaAIRegistrationView appears.
 //   b. Physician taps "Set Up in Meta AI" → Wearables.shared.startRegistration() opens Meta AI.
 //   c. Physician grants access in the Meta AI app and taps "Done".
-//   d. Meta AI deep-links back via com.farfelmed.ClinicalAI:// → onOpenURL fires.
-//   e. Wearables.shared.handleUrl(_:) processes the callback.
+//   d. Meta AI redirects to AppLinkURLScheme (https://alexfarfel.github.io/ClinicalAI/).
+//      iOS sees the Associated Domains entitlement, intercepts the https:// URL, and
+//      delivers it to the app via onContinueUserActivity(NSUserActivityTypeBrowsingWeb).
+//      Without that modifier, iOS falls through to Safari — the app is never called.
+//   e. Wearables.shared.handleUrl(_:) processes the URL from the NSUserActivity.
 //   f. SDK emits .registered → registration sheet dismisses automatically.
 //   g. On the next startDiscovery(), the glasses appear in devicesStream().
+//
+// Two URL entry points are wired up:
+//   • onContinueUserActivity — handles https:// Universal Links (the normal callback path)
+//   • onOpenURL              — handles com.farfelmed.ClinicalAI:// custom scheme (fallback)
 //
 // Reset flow (if registration appears stuck):
 //   Tap "Force Re-register" → startUnregistration() then startRegistration().
@@ -53,11 +60,10 @@ struct ClinicalAIApp: App {
     init() {
         // MWDAT must be configured once before any other SDK call.
         // Production config is read from Info.plist MWDAT dict:
-        //   MetaAppID      = $(META_APP_ID)   from Secrets.xcconfig
-        //   ClientToken    = $(CLIENT_TOKEN)   from Secrets.xcconfig
-        //   TeamID         = $(DEVELOPMENT_TEAM)  = F74TQ3S46Y
+        //   MetaAppID        = 4755280994792511
+        //   ClientToken      = AR|...|...
+        //   TeamID           = F74TQ3S46Y
         //   AppLinkURLScheme = https://alexfarfel.github.io/ClinicalAI/
-        //   DAMEnabled     = true
         do {
             try Wearables.configure()
             print("ClinicalAI ✅ Wearables.configure() succeeded")
@@ -108,11 +114,28 @@ struct ClinicalAIApp: App {
                         showAPIKeySetup = false
                     }
                 }
-                // ── MWDAT deep-link handler ───────────────────────────────────────
-                // Meta AI calls back via com.farfelmed.ClinicalAI:// after the
-                // physician completes the registration flow. Forward to the SDK.
+                // ── Universal Link handler (primary callback path) ────────────────
+                // iOS delivers https:// Universal Links via NSUserActivity, NOT via
+                // onOpenURL. Without this modifier, iOS opens Safari instead of the app.
+                // The Associated Domains entitlement (applinks:alexfarfel.github.io) tells
+                // iOS that this app owns those URLs; this modifier is the receiver.
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { userActivity in
+                    guard let url = userActivity.webpageURL else { return }
+                    print("ClinicalAI 🔗 onContinueUserActivity (Universal Link): \(url)")
+                    Task {
+                        do {
+                            let handled = try await Wearables.shared.handleUrl(url)
+                            print("ClinicalAI 🔗 handleUrl returned: \(handled)")
+                        } catch {
+                            print("ClinicalAI 🔗 handleUrl failed for \(url): \(error)")
+                        }
+                    }
+                }
+                // ── Custom scheme handler (fallback path) ─────────────────────────
+                // Handles com.farfelmed.ClinicalAI:// if Meta AI uses the custom scheme
+                // rather than the Universal Link. Both paths call the same handleUrl().
                 .onOpenURL { url in
-                    print("ClinicalAI 🔗 onOpenURL: \(url)")
+                    print("ClinicalAI 🔗 onOpenURL (custom scheme): \(url)")
                     Task {
                         do {
                             let handled = try await Wearables.shared.handleUrl(url)
