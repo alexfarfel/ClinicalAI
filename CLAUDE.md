@@ -1,10 +1,9 @@
 # ClinicalAI
 
 ## Current Status (update this each session)
-- Prompts 1-6 COMPLETE
+- Prompts 1-7 COMPLETE
 - @MainActor concurrency cascade resolved — see rules below
-- Next: Prompt 7 — AI diagnostic partner
-- Then: live test with physical glasses
+- Next: live test with physical glasses
 
 ## What this is
 An iOS app that pairs with Meta AI smart glasses to function as an ambient clinical 

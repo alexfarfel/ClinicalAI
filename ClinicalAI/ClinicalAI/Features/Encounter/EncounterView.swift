@@ -33,6 +33,7 @@ struct EncounterView: View {
     @State private var annotationText = ""
     @State private var showHardwareMapping = false
     @State private var showNoteView = false
+    @State private var showDiagnosticView = false
     @State private var showFlash = false
 
     var body: some View {
@@ -66,6 +67,13 @@ struct EncounterView: View {
                 if let note = viewModel.generatedNote,
                    let session = viewModel.currentSession {
                     NoteView(note: note, session: session)
+                }
+            }
+            // Diagnostic partner — pass the live session so Claude has full
+            // encounter context (transcript + findings captured so far).
+            .navigationDestination(isPresented: $showDiagnosticView) {
+                if let session = viewModel.currentSession {
+                    DiagnosticView(session: session)
                 }
             }
             // ── Reactive responses ────────────────────────────────────────────────
@@ -217,6 +225,7 @@ struct EncounterView: View {
             // ── Bottom controls ─────────────────────────────────────────────────
             VStack(spacing: 12) {
                 captureSection
+                consultAIButton
                 endButton
             }
             .padding(.horizontal, 20)
@@ -320,6 +329,26 @@ struct EncounterView: View {
         if m.longPressSide       == .captureExamFinding { return "or long-press the side arm" }
         if m.voiceCommandDetected == .captureExamFinding { return "or use a voice command" }
         return nil
+    }
+
+    // MARK: - Consult AI button
+
+    /// Opens the AI diagnostic partner with the current encounter session as context.
+    ///
+    /// Available during an active recording so the physician can consult mid-encounter.
+    /// Disabled while connecting or generating a note.
+    private var consultAIButton: some View {
+        Button {
+            showDiagnosticView = true
+        } label: {
+            Label("Consult AI", systemImage: "brain.head.profile")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+        }
+        .buttonStyle(.bordered)
+        .tint(.teal)
+        .disabled(viewModel.state != .recording)
     }
 
     // MARK: - End encounter button
