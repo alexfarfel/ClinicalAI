@@ -344,25 +344,31 @@ final class GlassesService: GlassesServiceProtocol {
         discoveredDevices = []
         deviceIdentifierMap = [:]
         connectionStatus = .scanning
+        print("ClinicalAI 🔍 startDiscovery() — requesting camera permission")
 
-        // MWDAT requires camera permission before any device appears in devicesStream().
+        // Step 1: check/request camera permission before subscribing to devicesStream().
         // PermissionStatus has only .granted and .denied — default to .denied on error.
         let currentStatus = (try? await wearables.checkPermissionStatus(.camera)) ?? .denied
+        print("ClinicalAI 🔍 camera permission check: \(currentStatus)")
         if currentStatus != .granted {
+            print("ClinicalAI 🔍 camera not yet granted — requesting…")
             let requested = (try? await wearables.requestPermission(.camera)) ?? .denied
+            print("ClinicalAI 🔍 camera permission after request: \(requested)")
             if requested != .granted {
                 connectionStatus = .error("Camera permission denied. Grant access via the Meta AI app.")
                 throw GlassesServiceError.bluetoothUnauthorized
             }
         }
+        print("ClinicalAI 🔍 camera permission granted — subscribing to devicesStream()")
 
-        // devicesStream() emits a new [DeviceIdentifier] (= [String]) array each time the
-        // list of paired nearby glasses changes. This loop runs until the task is cancelled.
+        // Step 2: subscribe to devicesStream(). Emits a fresh [DeviceIdentifier] array
+        // each time the set of paired nearby glasses changes.
         discoveryTask?.cancel()
         discoveryTask = Task { [weak self] in
             guard let self else { return }
             for await identifiers in wearables.devicesStream() {
                 guard !Task.isCancelled else { break }
+                print("ClinicalAI 🔍 devicesStream() emitted \(identifiers.count) identifier(s): \(identifiers)")
                 var map: [UUID: DeviceIdentifier] = [:]
                 var list: [GlassesDevice] = []
                 for identifier in identifiers {
@@ -370,6 +376,7 @@ final class GlassesService: GlassesServiceProtocol {
                     map[localID] = identifier
                     // deviceForIdentifier returns a Device? with a .name: String property.
                     let displayName = wearables.deviceForIdentifier(identifier)?.name ?? "Ray-Ban Meta"
+                    print("ClinicalAI 🔍 found device: id=\(identifier) name=\(displayName)")
                     list.append(GlassesDevice(
                         id: localID,
                         name: displayName,
@@ -378,12 +385,15 @@ final class GlassesService: GlassesServiceProtocol {
                 }
                 self.deviceIdentifierMap = map
                 self.discoveredDevices = list
+                print("ClinicalAI 🔍 discoveredDevices updated: \(list.map(\.name))")
             }
+            print("ClinicalAI 🔍 devicesStream() loop ended")
         }
 
         // Wait briefly so the first devicesStream() emission can arrive before we return.
         // EncounterViewModel polls discoveredDevices at 250 ms intervals, so this is fine.
         try await Task.sleep(for: .milliseconds(600))
+        print("ClinicalAI 🔍 startDiscovery() returning — devices so far: \(discoveredDevices.map(\.name))")
     }
 
     func connect(to device: GlassesDevice) async throws {

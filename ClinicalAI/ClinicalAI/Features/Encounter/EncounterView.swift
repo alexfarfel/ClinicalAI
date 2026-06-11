@@ -113,7 +113,7 @@ struct EncounterView: View {
             VStack(spacing: 8) {
                 Text("Ready to start an encounter")
                     .font(.title2.weight(.semibold))
-                Text("Connect your Meta AI glasses, then\ntap below to begin recording.")
+                Text("Tap below to grant camera permission and\nsearch for your nearby Meta AI glasses.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -124,7 +124,7 @@ struct EncounterView: View {
             Button {
                 Task { await viewModel.startDiscovery() }
             } label: {
-                Label("Connect Glasses & Start", systemImage: "bluetooth")
+                Label("Find Glasses", systemImage: "eyeglasses")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
