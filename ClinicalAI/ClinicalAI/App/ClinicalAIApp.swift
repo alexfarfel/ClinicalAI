@@ -13,17 +13,18 @@
 //   a. SDK emits .available from registrationStateStream() → MetaAIRegistrationView appears.
 //   b. Physician taps "Set Up in Meta AI" → Wearables.shared.startRegistration() opens Meta AI.
 //   c. Physician grants access in the Meta AI app and taps "Done".
-//   d. Meta AI redirects to AppLinkURLScheme (https://alexfarfel.github.io/ClinicalAI/).
-//      iOS sees the Associated Domains entitlement, intercepts the https:// URL, and
-//      delivers it to the app via onContinueUserActivity(NSUserActivityTypeBrowsingWeb).
-//      Without that modifier, iOS falls through to Safari — the app is never called.
-//   e. Wearables.shared.handleUrl(_:) processes the URL from the NSUserActivity.
+//   d. Meta AI redirects to AppLinkURLScheme (com.farfelmed.ClinicalAI://).
+//      iOS matches the scheme to CFBundleURLSchemes and calls onOpenURL — the app
+//      comes to the foreground immediately with no Safari round-trip.
+//   e. Wearables.shared.handleUrl(_:) processes the callback URL.
 //   f. SDK emits .registered → registration sheet dismisses automatically.
 //   g. On the next startDiscovery(), the glasses appear in devicesStream().
 //
 // Two URL entry points are wired up:
-//   • onContinueUserActivity — handles https:// Universal Links (the normal callback path)
-//   • onOpenURL              — handles com.farfelmed.ClinicalAI:// custom scheme (fallback)
+//   • onOpenURL              — handles com.farfelmed.ClinicalAI:// (PRIMARY callback path)
+//   • onContinueUserActivity — handles https:// Universal Links (retained as fallback;
+//                              the Meta portal still lists the GitHub Pages URL for
+//                              Apple's AASA verification, but it is not the active path)
 //
 // Reset flow (if registration appears stuck):
 //   Tap "Force Re-register" → startUnregistration() then startRegistration().
@@ -114,14 +115,12 @@ struct ClinicalAIApp: App {
                         showAPIKeySetup = false
                     }
                 }
-                // ── Universal Link handler (primary callback path) ────────────────
-                // iOS delivers https:// Universal Links via NSUserActivity, NOT via
-                // onOpenURL. Without this modifier, iOS opens Safari instead of the app.
-                // The Associated Domains entitlement (applinks:alexfarfel.github.io) tells
-                // iOS that this app owns those URLs; this modifier is the receiver.
-                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { userActivity in
-                    guard let url = userActivity.webpageURL else { return }
-                    print("ClinicalAI 🔗 onContinueUserActivity (Universal Link): \(url)")
+                // ── Custom scheme handler (PRIMARY callback path) ─────────────────
+                // AppLinkURLScheme = com.farfelmed.ClinicalAI:// in the MWDAT dict.
+                // iOS matches this to CFBundleURLSchemes and delivers it here directly —
+                // no Safari round-trip, no Associated Domains lookup required.
+                .onOpenURL { url in
+                    print("ClinicalAI 🔗 onOpenURL (custom scheme): \(url)")
                     Task {
                         do {
                             let handled = try await Wearables.shared.handleUrl(url)
@@ -131,11 +130,12 @@ struct ClinicalAIApp: App {
                         }
                     }
                 }
-                // ── Custom scheme handler (fallback path) ─────────────────────────
-                // Handles com.farfelmed.ClinicalAI:// if Meta AI uses the custom scheme
-                // rather than the Universal Link. Both paths call the same handleUrl().
-                .onOpenURL { url in
-                    print("ClinicalAI 🔗 onOpenURL (custom scheme): \(url)")
+                // ── Universal Link handler (fallback path) ────────────────────────
+                // Retained in case the Meta portal falls back to the https:// URL.
+                // The Associated Domains entitlement keeps this path valid.
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { userActivity in
+                    guard let url = userActivity.webpageURL else { return }
+                    print("ClinicalAI 🔗 onContinueUserActivity (Universal Link): \(url)")
                     Task {
                         do {
                             let handled = try await Wearables.shared.handleUrl(url)
